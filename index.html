@@ -699,7 +699,7 @@
                 XLSX.writeFile(wb, `ESD_Measurements_${new Date().toISOString().slice(0,10)}.xlsx`);
             };
 
-            // Excel Import Logic
+            // Excel Import Logic (Smart)
             const handleImportExcel = (file) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -709,15 +709,38 @@
                     const sheet = workbook.Sheets[sheetName];
                     const jsonData = XLSX.utils.sheet_to_json(sheet);
                     
+                    let importCount = 0;
                     const newMeasurements = jsonData.map((row, index) => {
-                         // Simple mapper
-                         const typeLabel = row['類型'];
-                         let type = FixtureType.ICT;
-                         // Reverse lookup for type
-                         for (const [key, label] of Object.entries(FIXTURE_LABELS)) {
-                             if (label === typeLabel) type = key;
+                         // 1. Resolve Type
+                         const typeLabel = (row['類型'] || '').toString().trim();
+                         let type = FixtureType.MDA; // Default
+                         
+                         // Try to match by Key (MDA) or Label (MDA 測試治具)
+                         const foundKey = Object.keys(FIXTURE_LABELS).find(k => k === typeLabel);
+                         if (foundKey) {
+                             type = foundKey;
+                         } else {
+                             const foundLabelEntry = Object.entries(FIXTURE_LABELS).find(([k, v]) => v === typeLabel || typeLabel.includes(k));
+                             if (foundLabelEntry) type = foundLabelEntry[0];
                          }
 
+                         // 2. Resolve Result
+                         let result = TestResult.PASS;
+                         const resistance = Number(row['阻值(Ω)']) || 0;
+                         const limits = THRESHOLDS[type];
+                         
+                         // Auto-calculate if "結果" is missing, otherwise trust the file but map string to enum
+                         if (!row['結果']) {
+                             if (resistance < limits.lowLimit) result = TestResult.FAIL_LOW;
+                             else if (resistance > limits.highLimit) result = TestResult.FAIL_HIGH;
+                         } else {
+                             const resStr = row['結果'].toString();
+                             if (resStr.includes('高') || resStr.includes('HIGH')) result = TestResult.FAIL_HIGH;
+                             else if (resStr.includes('低') || resStr.includes('LOW')) result = TestResult.FAIL_LOW;
+                             else result = TestResult.PASS;
+                         }
+                         
+                         importCount++;
                          return {
                              id: `imported-${Date.now()}-${index}`,
                              timestamp: new Date(row['量測時間']).getTime() || Date.now(),
@@ -725,17 +748,16 @@
                              fixtureName: row['治具名稱'] || 'Unknown',
                              type: type,
                              inspectorName: row['檢測人員'] || '',
-                             resistanceValue: Number(row['阻值(Ω)']) || 0,
-                             result: row['結果'] === '合格' ? TestResult.PASS : TestResult.FAIL_HIGH // Simplified
+                             resistanceValue: resistance,
+                             result: result
                          };
                     });
                     
-                    if (confirm(`成功讀取 ${newMeasurements.length} 筆資料。是否要匯入並覆蓋現有資料? (選擇取消則會附加在現有資料後)`)) {
+                    if (confirm(`成功讀取 ${importCount} 筆資料。是否要匯入並覆蓋現有資料? (選擇取消則會附加在現有資料後)`)) {
                         setMeasurements(newMeasurements);
                     } else {
                         setMeasurements(prev => [...newMeasurements, ...prev]);
                     }
-                    alert("匯入完成");
                 };
                 reader.readAsArrayBuffer(file);
             };
