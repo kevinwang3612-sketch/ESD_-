@@ -24,21 +24,20 @@
         }
     </script>
     
-    <!-- 2. Babel Standalone -->
+    <!-- 2. Babel Standalone (for JSX) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- 3. SheetJS for Excel -->
+    <!-- 3. SheetJS (for Excel) -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
-    <!-- 4. Import Map (Strictly Pinned to React 18.2.0) -->
+    <!-- 4. Import Map (FIXED: Strictly pinned to React 18.2.0) -->
     <script type="importmap">
 {
   "imports": {
     "react": "https://esm.sh/react@18.2.0",
     "react-dom/client": "https://esm.sh/react-dom@18.2.0/client?deps=react@18.2.0",
-    "react-dom": "https://esm.sh/react-dom@18.2.0?deps=react@18.2.0",
-    "lucide-react": "https://esm.sh/lucide-react@0.263.1?deps=react@18.2.0,react-dom@18.2.0",
-    "recharts": "https://esm.sh/recharts@2.12.0?deps=react@18.2.0,react-dom@18.2.0",
+    "lucide-react": "https://esm.sh/lucide-react@0.263.1?deps=react@18.2.0",
+    "recharts": "https://esm.sh/recharts@2.12.0?deps=react@18.2.0",
     "qrcode": "https://esm.sh/qrcode@1.5.3",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
@@ -58,7 +57,7 @@
         from { opacity: 0; transform: translateY(10px); }
         to { opacity: 1; transform: translateY(0); }
       }
-      /* Custom Scrollbar for dark mode consistency */
+      /* Custom Scrollbar */
       .dark ::-webkit-scrollbar {
         width: 8px;
         height: 8px;
@@ -87,7 +86,7 @@
             RefreshCw, Cpu, Calendar, Mail, AlertTriangle, CheckCircle2, 
             Settings, Save, CheckCircle, XCircle, QrCode as QrIcon, X, 
             CalendarClock, CalendarPlus, Download, Upload, FileSpreadsheet,
-            Moon, Sun
+            Moon, Sun, ArrowUp, ArrowDown, ArrowUpDown
         } from 'lucide-react';
         import {
             BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -95,7 +94,7 @@
         } from 'recharts';
         import QRCode from 'qrcode';
 
-        // --- Constants & Configuration ---
+        // --- Constants & Types ---
         const COLORS = ['#10B981', '#EF4444', '#F59E0B'];
 
         const FixtureType = {
@@ -122,7 +121,6 @@
             [FixtureType.TRAY]:   { lowLimit: 1e4, highLimit: 1e9 }
         };
 
-        // Note: The order here determines the order in the dropdown
         const FIXTURE_LABELS = {
             [FixtureType.MDA]: 'MDA 測試治具',
             [FixtureType.TR5001]: 'TR5001機台',
@@ -130,12 +128,6 @@
             [FixtureType.FCT]: 'FCT 功能治具',
             [FixtureType.JIG]: '組裝治具',
             [FixtureType.TRAY]: 'ESD 承載盤'
-        };
-
-        // --- Mock Data Generator ---
-        const generateMockData = () => {
-            // CLEAN SLATE: Return empty array as requested
-            return [];
         };
 
         // --- Components ---
@@ -176,7 +168,6 @@
                 const file = e.target.files[0];
                 if (file) {
                     onImport(file);
-                    // Reset input so same file can be selected again if needed
                     e.target.value = null;
                 }
             };
@@ -474,7 +465,7 @@
 
         const HistoryTable = ({ measurements, config, onRenew }) => {
             const [selectedQr, setSelectedQr] = useState(null);
-            const sorted = [...measurements].sort((a, b) => b.timestamp - a.timestamp);
+            const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'desc' });
 
             const checkIsExpired = (timestamp) => {
                 const expDate = new Date(timestamp);
@@ -551,6 +542,47 @@
                 return <span className="text-gray-400 dark:text-gray-500 text-xs">{expDate.toLocaleDateString()} 到期</span>;
             };
 
+            const requestSort = (key) => {
+                let direction = 'asc';
+                if (sortConfig.key === key && sortConfig.direction === 'asc') {
+                    direction = 'desc';
+                }
+                setSortConfig({ key, direction });
+            };
+
+            const sortedMeasurements = React.useMemo(() => {
+                let sortableItems = [...measurements];
+                if (sortConfig.key !== null) {
+                    sortableItems.sort((a, b) => {
+                        let aValue = a[sortConfig.key];
+                        let bValue = b[sortConfig.key];
+
+                        // Custom sort keys
+                        if (sortConfig.key === 'expirationStatus') {
+                            const getDays = (m) => {
+                                const exp = new Date(m.timestamp);
+                                exp.setMonth(exp.getMonth() + config.expirationMonths);
+                                return exp.getTime() - Date.now();
+                            };
+                            aValue = getDays(a);
+                            bValue = getDays(b);
+                        }
+
+                        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+                        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+                        return 0;
+                    });
+                }
+                return sortableItems;
+            }, [measurements, sortConfig, config]);
+
+            const SortIcon = ({ column }) => {
+                if (sortConfig.key !== column) return <ArrowUpDown size={14} className="text-gray-300 dark:text-gray-600 ml-1" />;
+                return sortConfig.direction === 'asc' 
+                    ? <ArrowUp size={14} className="text-indigo-600 dark:text-indigo-400 ml-1" />
+                    : <ArrowDown size={14} className="text-indigo-600 dark:text-indigo-400 ml-1" />;
+            };
+
             return (
                 <>
                     {selectedQr && (
@@ -571,17 +603,29 @@
                             <table className="w-full text-sm text-left text-gray-900 dark:text-gray-100">
                                 <thead className="bg-gray-50 dark:bg-gray-750 text-gray-600 dark:text-gray-300 font-medium border-b border-gray-100 dark:border-gray-700">
                                     <tr>
-                                        <th className="px-6 py-4">量測時間</th>
-                                        <th className="px-6 py-4">標籤編號 / 治具名稱</th>
-                                        <th className="px-6 py-4">類型</th>
-                                        <th className="px-6 py-4 text-right">阻值 (Ω)</th>
-                                        <th className="px-6 py-4">結果</th>
-                                        <th className="px-6 py-4">效期狀態</th>
+                                        <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => requestSort('timestamp')}>
+                                            <div className="flex items-center">量測時間 <SortIcon column="timestamp"/></div>
+                                        </th>
+                                        <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => requestSort('fixtureId')}>
+                                            <div className="flex items-center">標籤編號 / 治具名稱 <SortIcon column="fixtureId"/></div>
+                                        </th>
+                                        <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => requestSort('type')}>
+                                            <div className="flex items-center">類型 <SortIcon column="type"/></div>
+                                        </th>
+                                        <th className="px-6 py-4 text-right cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => requestSort('resistanceValue')}>
+                                            <div className="flex items-center justify-end">阻值 (Ω) <SortIcon column="resistanceValue"/></div>
+                                        </th>
+                                        <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => requestSort('result')}>
+                                            <div className="flex items-center">結果 <SortIcon column="result"/></div>
+                                        </th>
+                                        <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => requestSort('expirationStatus')}>
+                                            <div className="flex items-center">效期狀態 <SortIcon column="expirationStatus"/></div>
+                                        </th>
                                         <th className="px-6 py-4 text-center">功能</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                    {sorted.map((m) => (
+                                    {sortedMeasurements.map((m) => (
                                         <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                                             <td className="px-6 py-4 text-gray-500 dark:text-gray-400">
                                                 <div className="text-gray-900 dark:text-white">{new Date(m.timestamp).toLocaleDateString()}</div>
@@ -603,7 +647,7 @@
                                             </td>
                                         </tr>
                                     ))}
-                                    {sorted.length === 0 && <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-400 dark:text-gray-500">尚無治具量測記錄</td></tr>}
+                                    {sortedMeasurements.length === 0 && <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-400 dark:text-gray-500">尚無治具量測記錄</td></tr>}
                                 </tbody>
                             </table>
                         </div>
@@ -639,7 +683,7 @@
                 if (savedM) {
                     try { setMeasurements(JSON.parse(savedM)); } catch(e) {}
                 } else {
-                    setMeasurements(generateMockData()); // Seed mock data if empty
+                    setMeasurements([]); // Clean Slate
                 }
 
                 if (savedC) {
@@ -748,14 +792,11 @@
                          let timestamp = Date.now();
                          const rawTime = row['量測時間'];
                          if (rawTime instanceof Date) {
-                             // SheetJS converted it to Date object
                              timestamp = rawTime.getTime();
                          } else if (typeof rawTime === 'number') {
-                             // Fallback manual conversion if cellDates failed or user provided raw number
                              // Excel base: 1900-01-01. JS base: 1970-01-01. Diff ~25569 days
                              timestamp = new Date((rawTime - 25569) * 86400 * 1000).getTime();
                          } else if (typeof rawTime === 'string') {
-                             // Try parsing string
                              const parsed = Date.parse(rawTime);
                              if (!isNaN(parsed)) timestamp = parsed;
                          }
@@ -908,10 +949,8 @@
                                         </div>
                                     </div>
                                 )}
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <StatsCard title="已測治具數" value={stats.total} icon={Cpu} color="bg-blue-500 text-blue-600" trend={`+${stats.last24h}`} trendUp={true} />
-                                    <StatsCard title="合格率" value={`${stats.passRate.toFixed(1)}%`} icon={ShieldCheck} color="bg-green-500 text-green-600" />
-                                    <StatsCard title="維修/異常" value={stats.fails} icon={AlertOctagon} color="bg-red-500 text-red-600" />
                                     <StatsCard title="今日測試" value={stats.last24h} icon={History} color="bg-purple-500 text-purple-600" />
                                 </div>
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
