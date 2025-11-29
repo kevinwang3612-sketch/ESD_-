@@ -100,6 +100,7 @@
 
         const FixtureType = {
             MDA: 'MDA',
+            TR5001: 'TR5001',
             ICT: 'ICT',
             FCT: 'FCT',
             JIG: 'JIG',
@@ -113,16 +114,18 @@
         };
 
         const THRESHOLDS = {
-            [FixtureType.MDA]:  { lowLimit: 1e4, highLimit: 1e9 },
-            [FixtureType.ICT]:  { lowLimit: 1e4, highLimit: 1e9 },
-            [FixtureType.FCT]:  { lowLimit: 1e4, highLimit: 1e9 },
-            [FixtureType.JIG]:  { lowLimit: 1e4, highLimit: 1e9 },
-            [FixtureType.TRAY]: { lowLimit: 1e4, highLimit: 1e9 }
+            [FixtureType.MDA]:    { lowLimit: 1e4, highLimit: 1e9 },
+            [FixtureType.TR5001]: { lowLimit: 1e4, highLimit: 1e9 },
+            [FixtureType.ICT]:    { lowLimit: 1e4, highLimit: 1e9 },
+            [FixtureType.FCT]:    { lowLimit: 1e4, highLimit: 1e9 },
+            [FixtureType.JIG]:    { lowLimit: 1e4, highLimit: 1e9 },
+            [FixtureType.TRAY]:   { lowLimit: 1e4, highLimit: 1e9 }
         };
 
         // Note: The order here determines the order in the dropdown
         const FIXTURE_LABELS = {
             [FixtureType.MDA]: 'MDA 測試治具',
+            [FixtureType.TR5001]: 'TR5001機台',
             [FixtureType.ICT]: 'ICT 測試治具',
             [FixtureType.FCT]: 'FCT 功能治具',
             [FixtureType.JIG]: '組裝治具',
