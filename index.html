@@ -176,6 +176,8 @@
                 const file = e.target.files[0];
                 if (file) {
                     onImport(file);
+                    // Reset input so same file can be selected again if needed
+                    e.target.value = null;
                 }
             };
 
@@ -707,7 +709,8 @@
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const data = new Uint8Array(e.target.result);
-                    const workbook = XLSX.read(data, {type: 'array'});
+                    // Enable cellDates to convert Serial Numbers (e.g. 45321) to JS Dates automatically
+                    const workbook = XLSX.read(data, {type: 'array', cellDates: true});
                     const sheetName = workbook.SheetNames[0];
                     const sheet = workbook.Sheets[sheetName];
                     const jsonData = XLSX.utils.sheet_to_json(sheet);
@@ -718,7 +721,6 @@
                          const typeLabel = (row['類型'] || '').toString().trim();
                          let type = FixtureType.MDA; // Default
                          
-                         // Try to match by Key (MDA) or Label (MDA 測試治具)
                          const foundKey = Object.keys(FIXTURE_LABELS).find(k => k === typeLabel);
                          if (foundKey) {
                              type = foundKey;
@@ -732,7 +734,6 @@
                          const resistance = Number(row['阻值(Ω)']) || 0;
                          const limits = THRESHOLDS[type];
                          
-                         // Auto-calculate if "結果" is missing, otherwise trust the file but map string to enum
                          if (!row['結果']) {
                              if (resistance < limits.lowLimit) result = TestResult.FAIL_LOW;
                              else if (resistance > limits.highLimit) result = TestResult.FAIL_HIGH;
@@ -742,11 +743,27 @@
                              else if (resStr.includes('低') || resStr.includes('LOW')) result = TestResult.FAIL_LOW;
                              else result = TestResult.PASS;
                          }
+
+                         // 3. Resolve Timestamp (Handle both Excel Dates and Strings)
+                         let timestamp = Date.now();
+                         const rawTime = row['量測時間'];
+                         if (rawTime instanceof Date) {
+                             // SheetJS converted it to Date object
+                             timestamp = rawTime.getTime();
+                         } else if (typeof rawTime === 'number') {
+                             // Fallback manual conversion if cellDates failed or user provided raw number
+                             // Excel base: 1900-01-01. JS base: 1970-01-01. Diff ~25569 days
+                             timestamp = new Date((rawTime - 25569) * 86400 * 1000).getTime();
+                         } else if (typeof rawTime === 'string') {
+                             // Try parsing string
+                             const parsed = Date.parse(rawTime);
+                             if (!isNaN(parsed)) timestamp = parsed;
+                         }
                          
                          importCount++;
                          return {
                              id: `imported-${Date.now()}-${index}`,
-                             timestamp: new Date(row['量測時間']).getTime() || Date.now(),
+                             timestamp: timestamp,
                              fixtureId: row['標籤編號'] || row['治具編號'] || 'UNKNOWN',
                              fixtureName: row['治具名稱'] || 'Unknown',
                              type: type,
