@@ -306,14 +306,25 @@
                     const expDate = new Date(now);
                     expDate.setMonth(expDate.getMonth() + config.expirationMonths);
 
-                    const qrContent = JSON.stringify({
-                        "治具名稱": data.fixtureName,
-                        "量測阻值": `${data.resistanceValue.toExponential(2)} Ω`,
-                        "量測日期": now.toISOString().split('T')[0],
-                        "過期時間": expDate.toISOString().split('T')[0]
-                    });
+                    // Generate URL for dynamic scanning
+                    // Encode data into base64 to put in URL query param
+                    const payload = {
+                        id: data.fixtureId,
+                        name: data.fixtureName,
+                        val: data.resistanceValue,
+                        date: now.getTime(),
+                        exp: expDate.getTime()
+                    };
                     
-                    const url = await QRCode.toDataURL(qrContent, { width: 300, margin: 2 });
+                    // Simple base64 encoding for the demo URL (in production, might use a database ID)
+                    const jsonStr = JSON.stringify(payload);
+                    // Use window.btoa with UTF-8 fix for Chinese characters
+                    const base64Data = window.btoa(unescape(encodeURIComponent(jsonStr)));
+                    
+                    // The URL points back to the current page with ?q=...
+                    const appUrl = `${window.location.origin}${window.location.pathname}?q=${base64Data}`;
+                    
+                    const url = await QRCode.toDataURL(appUrl, { width: 300, margin: 2 });
                     setQrUrl(url);
                 } catch (err) { console.error(err); }
             };
@@ -463,6 +474,50 @@
             );
         };
 
+        const ScanResultModal = ({ data, onClose }) => {
+            if (!data) return null;
+            const now = Date.now();
+            const expDate = data.exp;
+            const diff = expDate - now;
+            const daysRemaining = Math.ceil(diff / (1000 * 60 * 60 * 24));
+            let status = 'VALID';
+            if (diff < 0) status = 'EXPIRED';
+            else if (daysRemaining <= 7) status = 'WARNING';
+
+            return (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-sm w-full p-8 text-center animate-fade-in-up border border-gray-200 dark:border-gray-700 relative">
+                        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={24}/></button>
+                        
+                        <div className="mb-6 flex justify-center">
+                            {status === 'VALID' && <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center"><CheckCircle size={40} className="text-green-600 dark:text-green-400"/></div>}
+                            {status === 'WARNING' && <div className="w-20 h-20 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center"><AlertTriangle size={40} className="text-yellow-600 dark:text-yellow-400"/></div>}
+                            {status === 'EXPIRED' && <div className="w-20 h-20 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center"><XCircle size={40} className="text-red-600 dark:text-red-400"/></div>}
+                        </div>
+
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{data.name}</h2>
+                        <p className="text-gray-500 dark:text-gray-400 font-mono mb-6">{data.id}</p>
+
+                        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 mb-6 text-left space-y-2">
+                            <div className="flex justify-between"><span className="text-gray-500 dark:text-gray-400">上次量測</span><span className="font-medium text-gray-800 dark:text-gray-200">{new Date(data.date).toLocaleDateString()}</span></div>
+                            <div className="flex justify-between"><span className="text-gray-500 dark:text-gray-400">量測阻值</span><span className="font-medium font-mono text-gray-800 dark:text-gray-200">{Number(data.val).toExponential(2)} Ω</span></div>
+                            <div className="border-t border-gray-200 dark:border-gray-600 my-2"></div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-gray-500 dark:text-gray-400">到期日</span>
+                                <span className="font-medium text-gray-800 dark:text-gray-200">{new Date(data.exp).toLocaleDateString()}</span>
+                            </div>
+                        </div>
+
+                        {status === 'VALID' && <div className="bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300 py-3 rounded-lg font-bold text-lg">✅ 狀態有效 (剩 {daysRemaining} 天)</div>}
+                        {status === 'WARNING' && <div className="bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-300 py-3 rounded-lg font-bold text-lg">⚠️ 即將到期 (剩 {daysRemaining} 天)</div>}
+                        {status === 'EXPIRED' && <div className="bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300 py-3 rounded-lg font-bold text-lg">❌ 已過期 {Math.abs(daysRemaining)} 天</div>}
+                        
+                        <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-900 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-800 dark:hover:bg-gray-600 transition">進入系統</button>
+                    </div>
+                </div>
+            );
+        };
+
         const HistoryTable = ({ measurements, config, onRenew }) => {
             const [selectedQr, setSelectedQr] = useState(null);
             const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'desc' });
@@ -478,13 +533,20 @@
                     const dateObj = new Date(m.timestamp);
                     const expDate = new Date(dateObj);
                     expDate.setMonth(expDate.getMonth() + config.expirationMonths);
-                    const qrContent = JSON.stringify({
-                        "治具名稱": m.fixtureName,
-                        "量測阻值": `${m.resistanceValue.toExponential(2)} Ω`,
-                        "量測日期": dateObj.toISOString().split('T')[0],
-                        "過期時間": expDate.toISOString().split('T')[0]
-                    });
-                    const url = await QRCode.toDataURL(qrContent, { width: 300, margin: 2 });
+                    
+                    // Generate URL for dynamic scanning
+                    const payload = {
+                        id: m.fixtureId,
+                        name: m.fixtureName,
+                        val: m.resistanceValue,
+                        date: dateObj.getTime(),
+                        exp: expDate.getTime()
+                    };
+                    const jsonStr = JSON.stringify(payload);
+                    const base64Data = window.btoa(unescape(encodeURIComponent(jsonStr)));
+                    const appUrl = `${window.location.origin}${window.location.pathname}?q=${base64Data}`;
+
+                    const url = await QRCode.toDataURL(appUrl, { width: 300, margin: 2 });
                     setSelectedQr({ url, title: m.fixtureId, isExpired: checkIsExpired(m.timestamp) });
                 } catch (e) { console.error("Failed to generate QR", e); }
             };
@@ -662,6 +724,8 @@
             const [showEntryForm, setShowEntryForm] = useState(false);
             const [showSettings, setShowSettings] = useState(false);
             const [entryFormInitialData, setEntryFormInitialData] = useState(null);
+            const [scanData, setScanData] = useState(null);
+            
             const [darkMode, setDarkMode] = useState(() => {
                 if (localStorage.getItem('theme')) {
                     return localStorage.getItem('theme') === 'dark';
@@ -674,6 +738,25 @@
                 warningDays: 7,
                 notificationEmail: ''
             });
+
+            // 0. Handle QR Code URL parameters on mount
+            useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const q = params.get('q');
+                if (q) {
+                    try {
+                        const decodedStr = decodeURIComponent(escape(window.atob(q)));
+                        const data = JSON.parse(decodedStr);
+                        if (data && data.id && data.exp) {
+                            setScanData(data);
+                            // Clean URL
+                            window.history.replaceState({}, document.title, window.location.pathname);
+                        }
+                    } catch (e) {
+                        console.error("Invalid QR code data", e);
+                    }
+                }
+            }, []);
 
             // 1. Load Data from LocalStorage
             useEffect(() => {
@@ -863,28 +946,9 @@
 
             const stats = useMemo(() => {
                 const total = measurements.length;
-                const passes = measurements.filter(m => m.result === TestResult.PASS).length;
-                const fails = total - passes;
-                const passRate = total > 0 ? (passes / total) * 100 : 0;
                 const last24h = measurements.filter(m => Date.now() - m.timestamp < 24 * 60 * 60 * 1000).length;
-                return { total, passes, fails, passRate, last24h };
+                return { total, last24h };
             }, [measurements]);
-
-            const dailyData = useMemo(() => {
-                const map = new Map();
-                measurements.forEach(m => {
-                    const date = new Date(m.timestamp).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
-                    if (!map.has(date)) map.set(date, { date, pass: 0, fail: 0 });
-                    if (m.result === TestResult.PASS) map.get(date).pass++; else map.get(date).fail++;
-                });
-                return Array.from(map.values()).sort((a, b) => new Date(Date.parse(`2024/${a.date}`)) - new Date(Date.parse(`2024/${b.date}`))).slice(-7);
-            }, [measurements]);
-
-            const pieData = [
-                { name: '合格', value: stats.passes },
-                { name: '失敗 (高阻)', value: measurements.filter(m => m.result === TestResult.FAIL_HIGH).length },
-                { name: '失敗 (低阻)', value: measurements.filter(m => m.result === TestResult.FAIL_LOW).length },
-            ];
 
             return (
                 <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col font-sans text-slate-800 dark:text-gray-100 transition-colors duration-200">
@@ -918,6 +982,7 @@
                     <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
                         {showEntryForm && <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"><div className="w-full max-w-2xl animate-fade-in-up"><EntryForm onAddMeasurement={handleAddMeasurement} onCancel={() => {setShowEntryForm(false); setEntryFormInitialData(null);}} config={config} initialData={entryFormInitialData}/></div></div>}
                         {showSettings && <SettingsModal config={config} onSave={setConfig} onClose={() => setShowSettings(false)} onExport={handleExportExcel} onImport={handleImportExcel} />}
+                        {scanData && <ScanResultModal data={scanData} onClose={() => setScanData(null)} />}
 
                         {activeTab === 'dashboard' && (
                             <div className="space-y-6">
@@ -952,58 +1017,6 @@
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <StatsCard title="已測治具數" value={stats.total} icon={Cpu} color="bg-blue-500 text-blue-600" trend={`+${stats.last24h}`} trendUp={true} />
                                     <StatsCard title="今日測試" value={stats.last24h} icon={History} color="bg-purple-500 text-purple-600" />
-                                </div>
-                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 lg:col-span-2">
-                                        <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2"><BarChart2 className="w-5 h-5 text-gray-400" /> 治具狀況趨勢</h3>
-                                        <div className="h-64 w-full">
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={dailyData}>
-                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "#374151" : "#E5E7EB"} />
-                                                    <XAxis dataKey="date" tick={{fontSize: 12, fill: darkMode ? '#9CA3AF' : '#6B7280'}} stroke={darkMode ? "#4B5563" : "#9CA3AF"} />
-                                                    <YAxis tick={{fontSize: 12, fill: darkMode ? '#9CA3AF' : '#6B7280'}} stroke={darkMode ? "#4B5563" : "#9CA3AF"} />
-                                                    <Tooltip 
-                                                        contentStyle={{
-                                                            borderRadius: '8px', 
-                                                            border: darkMode ? '1px solid #374151' : 'none', 
-                                                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                                                            backgroundColor: darkMode ? '#1f2937' : '#fff',
-                                                            color: darkMode ? '#fff' : '#000'
-                                                        }} 
-                                                        cursor={{fill: darkMode ? '#374151' : '#F3F4F6'}} 
-                                                    />
-                                                    <Legend wrapperStyle={{color: darkMode ? '#9CA3AF' : '#374151'}} />
-                                                    <Bar dataKey="pass" name="合格" stackId="a" fill="#10B981" radius={[0, 0, 4, 4]} />
-                                                    <Bar dataKey="fail" name="失敗" stackId="a" fill="#EF4444" radius={[4, 4, 0, 0]} />
-                                                </BarChart>
-                                            </ResponsiveContainer>
-                                        </div>
-                                    </div>
-                                    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                                        <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-6">結果分佈</h3>
-                                        <div className="h-64 w-full flex items-center justify-center">
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <PieChart>
-                                                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                                                        {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                                                    </Pie>
-                                                    <Tooltip 
-                                                        contentStyle={{
-                                                            borderRadius: '8px', 
-                                                            border: darkMode ? '1px solid #374151' : 'none', 
-                                                            backgroundColor: darkMode ? '#1f2937' : '#fff',
-                                                            color: darkMode ? '#fff' : '#000'
-                                                        }} 
-                                                    />
-                                                    <Legend verticalAlign="bottom" height={36}/>
-                                                </PieChart>
-                                            </ResponsiveContainer>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                                    <div className="flex justify-between items-center mb-6"><h3 className="text-lg font-bold text-gray-800 dark:text-white">最新治具量測</h3><button onClick={() => setActiveTab('history')} className="text-indigo-600 dark:text-indigo-400 text-sm hover:underline">查看全部</button></div>
-                                    <HistoryTable measurements={measurements.slice(0, 5)} config={config} onRenew={handleRenewFixture} />
                                 </div>
                             </div>
                         )}
