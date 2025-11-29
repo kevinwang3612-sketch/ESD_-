@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESD Sentinel - 治具量測追蹤</title>
+    
+    <!-- 1. Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        gray: {
+                            750: '#2d3748',
+                            850: '#1a202c', 
+                            950: '#0d1117',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- 2. Babel Standalone -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- 3. SheetJS for Excel -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+    <!-- 4. Import Map (Strictly Pinned to React 18.2.0) -->
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client?deps=react@18.2.0",
+    "lucide-react": "https://esm.sh/lucide-react@0.263.1?deps=react@18.2.0",
+    "recharts": "https://esm.sh/recharts@2.12.0?deps=react@18.2.0,react-dom@18.2.0",
+    "qrcode": "https://esm.sh/qrcode@1.5.3",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0"
+  }
+}
+</script>
+
+    <style>
+      body {
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      }
+      .animate-fade-in-up {
+        animation: fadeInUp 0.3s ease-out;
+      }
+      @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      /* Custom Scrollbar for dark mode consistency */
+      .dark ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      .dark ::-webkit-scrollbar-track {
+        background: #1f2937; 
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: #4b5563; 
+        border-radius: 4px;
+      }
+      .dark ::-webkit-scrollbar-thumb:hover {
+        background: #6b7280; 
+      }
+    </style>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useMemo, useRef } from 'react';
+        import ReactDOM from 'react-dom/client';
+        import { 
+            Activity, Plus, BarChart2, ShieldCheck, AlertOctagon, History, 
+            RefreshCw, Cpu, Calendar, Mail, AlertTriangle, CheckCircle2, 
+            Settings, Save, CheckCircle, XCircle, QrCode as QrIcon, X, 
+            CalendarClock, CalendarPlus, Download, Upload, FileSpreadsheet,
+            Moon, Sun
+        } from 'lucide-react';
+        import {
+            BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
+            ResponsiveContainer, PieChart, Pie, Cell, Legend
+        } from 'recharts';
+        import QRCode from 'qrcode';
+
+        // --- Constants & Configuration ---
+        const COLORS = ['#10B981', '#EF4444', '#F59E0B'];
+
+        const FixtureType = {
+            ICT: 'ICT',
+            FCT: 'FCT',
+            JIG: 'JIG',
+            TRAY: 'TRAY'
+        };
+
+        const TestResult = {
+            PASS: 'PASS',
+            FAIL_HIGH: 'FAIL_HIGH',
+            FAIL_LOW: 'FAIL_LOW'
+        };
+
+        const THRESHOLDS = {
+            [FixtureType.ICT]:  { lowLimit: 1e4, highLimit: 1e9 },
+            [FixtureType.FCT]:  { lowLimit: 1e4, highLimit: 1e9 },
+            [FixtureType.JIG]:  { lowLimit: 1e4, highLimit: 1e9 },
+            [FixtureType.TRAY]: { lowLimit: 1e4, highLimit: 1e9 }
+        };
+
+        const FIXTURE_LABELS = {
+            [FixtureType.ICT]: 'ICT 測試治具',
+            [FixtureType.FCT]: 'FCT 功能治具',
+            [FixtureType.JIG]: '組裝治具',
+            [FixtureType.TRAY]: 'ESD 承載盤'
+        };
+
+        // --- Mock Data Generator ---
+        const generateMockData = () => {
+            const data = [];
+            const now = Date.now();
+            const inspectors = ['Alex Chen', 'Sarah Lin', 'Mike Wang'];
+            const fixtures = [
+                { id: 'FIX-ICT-001', name: '主板 ICT 治具 A', type: FixtureType.ICT },
+                { id: 'FIX-ICT-002', name: '主板 ICT 治具 B', type: FixtureType.ICT },
+                { id: 'FIX-FCT-105', name: '音訊測試座', type: FixtureType.FCT },
+                { id: 'FIX-JIG-303', name: '組裝壓合治具', type: FixtureType.JIG },
+                { id: 'FIX-TRAY-009', name: '產線 ESD 托盤', type: FixtureType.TRAY },
+                { id: 'FIX-JIG-OLD-1', name: '舊款測試架 (待測)', type: FixtureType.JIG },
+            ];
+            
+            for (let i = 0; i < 20; i++) {
+                const fixture = fixtures[Math.floor(Math.random() * fixtures.length)];
+                const rand = Math.random();
+                let result = TestResult.PASS;
+                let val = 0;
+
+                if (rand > 0.2) {
+                    const minLog = Math.log10(1e4);
+                    const maxLog = Math.log10(1e9);
+                    val = Math.pow(10, minLog + Math.random() * (maxLog - minLog));
+                    result = TestResult.PASS;
+                } else if (rand > 0.05) {
+                    val = 1e9 + Math.random() * 9e9;
+                    result = TestResult.FAIL_HIGH;
+                } else {
+                    val = Math.random() * 1e4;
+                    result = TestResult.FAIL_LOW;
+                }
+                
+                const daysAgo = Math.floor(Math.random() * 180); 
+                const timestamp = now - (daysAgo * 24 * 60 * 60 * 1000);
+
+                data.push({
+                    id: `mock-${i}`,
+                    timestamp: timestamp,
+                    inspectorName: inspectors[Math.floor(Math.random() * inspectors.length)],
+                    fixtureId: fixture.id,
+                    fixtureName: fixture.name,
+                    type: fixture.type,
+                    resistanceValue: val,
+                    result: result
+                });
+            }
+            return data;
+        };
+
+        // --- Components ---
+
+        const StatsCard = ({ title, value, icon: Icon, trend, trendUp, color }) => (
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6 border border-gray-100 dark:border-gray-700 transition-all hover:shadow-md">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{value}</p>
+                    </div>
+                    <div className={`p-3 rounded-full ${color} bg-opacity-10 dark:bg-opacity-20`}>
+                        <Icon className={`w-6 h-6 ${color.replace('bg-', 'text-')}`} />
+                    </div>
+                </div>
+                {trend && (
+                    <div className="mt-4 flex items-center text-sm">
+                        <span className={trendUp ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                            {trend}
+                        </span>
+                        <span className="text-gray-400 dark:text-gray-500 ml-2">與上週相比</span>
+                    </div>
+                )}
+            </div>
+        );
+
+        const SettingsModal = ({ config, onSave, onClose, onExport, onImport }) => {
+            const [formData, setFormData] = useState(config);
+            const fileInputRef = useRef(null);
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                onSave(formData);
+                onClose();
+            };
+
+            const handleFileChange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    onImport(file);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg w-full max-w-md animate-fade-in-up overflow-hidden border border-gray-100 dark:border-gray-700">
+                        <div className="bg-gray-50 dark:bg-gray-900 px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center">
+                            <h3 className="font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                                <Settings className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                                系統設定
+                            </h3>
+                            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        
+                        <div className="p-6 space-y-6">
+                            {/* Data Management Section */}
+                            <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-lg p-4 border border-indigo-100 dark:border-indigo-800">
+                                <h4 className="font-medium text-indigo-900 dark:text-indigo-300 mb-3 flex items-center gap-2">
+                                    <FileSpreadsheet size={16} />
+                                    資料備份與還原
+                                </h4>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button 
+                                        type="button"
+                                        onClick={onExport}
+                                        className="flex items-center justify-center gap-2 bg-white dark:bg-gray-700 border border-indigo-200 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 py-2 rounded-lg hover:bg-indigo-50 dark:hover:bg-gray-600 transition text-sm font-medium"
+                                    >
+                                        <Download size={16} />
+                                        匯出 Excel
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="flex items-center justify-center gap-2 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition text-sm font-medium"
+                                    >
+                                        <Upload size={16} />
+                                        匯入 Excel
+                                    </button>
+                                    <input 
+                                        type="file" 
+                                        ref={fileInputRef}
+                                        onChange={handleFileChange}
+                                        accept=".xlsx,.xls"
+                                        className="hidden"
+                                    />
+                                </div>
+                                <p className="text-xs text-indigo-400 dark:text-indigo-300/70 mt-2">
+                                    匯出可將所有歷史記錄備份為 Excel 檔案。匯入時將合併現有資料。
+                                </p>
+                            </div>
+
+                            <form onSubmit={handleSubmit} className="space-y-5">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">預設通知 Email</label>
+                                    <input 
+                                        type="email" 
+                                        value={formData.notificationEmail}
+                                        onChange={e => setFormData({...formData, notificationEmail: e.target.value})}
+                                        placeholder="manager@example.com"
+                                        className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                                    />
+                                </div>
+                                
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">效期長度 (月)</label>
+                                        <input 
+                                            type="number" 
+                                            min="1"
+                                            max="24"
+                                            value={formData.expirationMonths}
+                                            onChange={e => setFormData({...formData, expirationMonths: parseInt(e.target.value) || 6})}
+                                            className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">到期前警示 (天)</label>
+                                        <input 
+                                            type="number" 
+                                            min="1"
+                                            max="60"
+                                            value={formData.warningDays}
+                                            onChange={e => setFormData({...formData, warningDays: parseInt(e.target.value) || 7})}
+                                            className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="pt-4 flex justify-end gap-3 border-t border-gray-50 dark:border-gray-700 mt-2">
+                                    <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition font-medium">取消</button>
+                                    <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium flex items-center gap-2">
+                                        <Save size={16} />
+                                        儲存設定
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const EntryForm = ({ onAddMeasurement, onCancel, config, initialData }) => {
+            const [step, setStep] = useState('form');
+            const [inspectorName, setInspectorName] = useState('');
+            const [fixtureId, setFixtureId] = useState(initialData?.fixtureId || '');
+            const [fixtureName, setFixtureName] = useState(initialData?.fixtureName || '');
+            const [type, setType] = useState(initialData?.type || FixtureType.ICT);
+            const [resistanceValue, setResistanceValue] = useState('');
+            const [qrUrl, setQrUrl] = useState('');
+            const [savedData, setSavedData] = useState(null);
+
+            const getProjectedResult = () => {
+                const val = parseFloat(resistanceValue);
+                if (isNaN(val)) return null;
+                const limits = THRESHOLDS[type];
+                if (val < limits.lowLimit) return TestResult.FAIL_LOW;
+                if (val > limits.highLimit) return TestResult.FAIL_HIGH;
+                return TestResult.PASS;
+            };
+
+            const projectedResult = getProjectedResult();
+
+            const getScientificDisplay = (valStr) => {
+                const val = parseFloat(valStr);
+                if (isNaN(val)) return '';
+                return val.toExponential(1).replace(/e\+?/, ' x 10^') + ' Ω';
+            };
+
+            const generateQR = async (data) => {
+                try {
+                    const now = new Date();
+                    const expDate = new Date(now);
+                    expDate.setMonth(expDate.getMonth() + config.expirationMonths);
+
+                    const qrContent = JSON.stringify({
+                        "治具名稱": data.fixtureName,
+                        "量測阻值": `${data.resistanceValue.toExponential(2)} Ω`,
+                        "量測日期": now.toISOString().split('T')[0],
+                        "過期時間": expDate.toISOString().split('T')[0]
+                    });
+                    
+                    const url = await QRCode.toDataURL(qrContent, { width: 300, margin: 2 });
+                    setQrUrl(url);
+                } catch (err) { console.error(err); }
+            };
+
+            const downloadIcsFile = () => {
+                if (!savedData) return;
+                const now = new Date();
+                const expDate = new Date(now);
+                expDate.setMonth(expDate.getMonth() + config.expirationMonths);
+                const formatDate = (date) => date.toISOString().replace(/-|:|\.\d+/g, '').slice(0, 8);
+                const title = `[ESD到期] 治具: ${savedData.fixtureName}`;
+                const description = `治具編號: ${savedData.fixtureId}\\n檢測人員: ${savedData.inspectorName}\\n上次阻值: ${savedData.resistanceValue.toExponential(2)} Ω\\n\\n請進行 ESD 表面阻抗補測。`;
+                
+                const icsContent = [
+                    'BEGIN:VCALENDAR',
+                    'VERSION:2.0',
+                    'BEGIN:VEVENT',
+                    `DTSTART;VALUE=DATE:${formatDate(expDate)}`,
+                    `DTEND;VALUE=DATE:${formatDate(new Date(expDate.getTime() + 86400000))}`,
+                    `SUMMARY:${title}`,
+                    `DESCRIPTION:${description}`,
+                    'BEGIN:VALARM',
+                    'ACTION:DISPLAY',
+                    'DESCRIPTION:ESD Fixture Expiration Reminder',
+                    'TRIGGER:-P1W',
+                    'END:VALARM',
+                    'END:VEVENT',
+                    'END:VCALENDAR'
+                ].join('\r\n');
+
+                const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = window.URL.createObjectURL(blob);
+                link.setAttribute('download', `ESD_Reminder_${savedData.fixtureId}.ics`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!projectedResult) return;
+                const measurementData = {
+                    inspectorName,
+                    fixtureId,
+                    fixtureName,
+                    type,
+                    resistanceValue: parseFloat(resistanceValue),
+                    result: projectedResult
+                };
+                setSavedData(measurementData);
+                await generateQR(measurementData);
+                onAddMeasurement(measurementData);
+                setStep('success');
+            };
+
+            if (step === 'success') {
+                return (
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 max-w-md mx-auto border border-gray-100 dark:border-gray-700 text-center animate-fade-in-up">
+                        <div className="mx-auto w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-4">
+                            <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
+                        </div>
+                        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">記錄已儲存</h2>
+                        <p className="text-gray-500 dark:text-gray-400 mb-6">已成功建立治具量測數據</p>
+                        
+                        <div className="bg-white p-4 rounded-lg border-2 border-dashed border-gray-200 dark:border-gray-600 inline-block mb-6 relative group">
+                            {qrUrl && <img src={qrUrl} alt="Fixture QR Code" className="w-48 h-48" />}
+                            <p className="text-xs text-gray-400 mt-2 font-mono">{fixtureId}</p>
+                        </div>
+                        <div className="flex flex-col gap-3">
+                            <button onClick={downloadIcsFile} className="w-full py-2.5 rounded-lg text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-700 font-medium transition shadow-sm flex items-center justify-center gap-2">
+                                <CalendarPlus className="w-5 h-5" />
+                                加入行事曆提醒
+                            </button>
+                            <button onClick={onCancel} className="w-full py-2.5 rounded-lg text-white bg-blue-600 hover:bg-blue-700 font-medium transition shadow-sm">
+                                完成並關閉
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 max-w-2xl mx-auto border border-gray-100 dark:border-gray-700">
+                    <div className="flex items-center justify-between mb-6">
+                        <h2 className="text-xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                            <Save className="w-5 h-5" />
+                            {initialData ? '治具補測更新' : '新增治具量測'}
+                        </h2>
+                        <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">治具編號 (ID)</label>
+                                <input required type="text" value={fixtureId} onChange={e => setFixtureId(e.target.value.toUpperCase())} disabled={!!initialData} className={`w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition uppercase ${initialData ? 'bg-gray-100 dark:bg-gray-900 text-gray-500' : ''}`} placeholder="FIX-2024-001" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">治具名稱</label>
+                                <input required type="text" value={fixtureName} onChange={e => setFixtureName(e.target.value)} disabled={!!initialData} className={`w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition ${initialData ? 'bg-gray-100 dark:bg-gray-900 text-gray-500' : ''}`} placeholder="主板功能測試座 A" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">治具類型</label>
+                                <select value={type} onChange={e => setType(e.target.value)} disabled={!!initialData} className={`w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition ${initialData ? 'bg-gray-100 dark:bg-gray-900 text-gray-500' : ''}`}>
+                                    {Object.entries(FIXTURE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">檢測人員</label>
+                                <input required type="text" value={inspectorName} onChange={e => setInspectorName(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="例如: Alex Chen" />
+                            </div>
+                            <div className="md:col-span-2">
+                                <div className="flex justify-between items-end mb-1">
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">表面阻抗量測值 (Ω)</label>
+                                    {resistanceValue && !isNaN(parseFloat(resistanceValue)) && (
+                                        <span className="text-xs font-mono font-medium text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded">
+                                            {getScientificDisplay(resistanceValue)}
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="relative">
+                                    <input required type="number" step="any" min="0" value={resistanceValue} onChange={e => setResistanceValue(e.target.value)} className={`w-full pl-4 pr-10 py-3 text-lg font-mono rounded-lg border focus:ring-2 outline-none transition ${projectedResult === TestResult.PASS ? 'border-green-300 dark:border-green-700 focus:ring-green-500 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300' : projectedResult === null ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-blue-500' : 'border-red-300 dark:border-red-700 focus:ring-red-500 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300'}`} placeholder="例如: 1.0e6 或 1000000" />
+                                    <div className="absolute right-3 top-3.5">
+                                        {projectedResult === TestResult.PASS && <CheckCircle className="w-6 h-6 text-green-500" />}
+                                        {(projectedResult === TestResult.FAIL_HIGH || projectedResult === TestResult.FAIL_LOW) && <XCircle className="w-6 h-6 text-red-500" />}
+                                    </div>
+                                </div>
+                                <div className="flex flex-col sm:flex-row justify-between mt-2 text-xs gap-1">
+                                    <span className="text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded inline-block">標準範圍: 1.0 x 10^4 Ω ~ 1.0 x 10^9 Ω</span>
+                                    <div>
+                                        {projectedResult === TestResult.FAIL_HIGH && <span className="text-red-600 dark:text-red-400 font-bold flex items-center gap-1"><XCircle size={12} /> 阻值過高 (大於 10^9 Ω)</span>}
+                                        {projectedResult === TestResult.FAIL_LOW && <span className="text-red-600 dark:text-red-400 font-bold flex items-center gap-1"><AlertTriangle size={12} /> 阻值過低 (小於 10^4 Ω)</span>}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 pt-6 border-t border-gray-100 dark:border-gray-700">
+                            <button type="button" onClick={onCancel} className="px-6 py-2 rounded-lg text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition font-medium">取消</button>
+                            <button type="submit" disabled={!projectedResult} className="px-6 py-2 rounded-lg text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition font-medium shadow-sm flex items-center gap-2">
+                                <QrIcon className="w-4 h-4" /> 儲存並產生 QR Code
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            );
+        };
+
+        const HistoryTable = ({ measurements, config, onRenew }) => {
+            const [selectedQr, setSelectedQr] = useState(null);
+            const sorted = [...measurements].sort((a, b) => b.timestamp - a.timestamp);
+
+            const checkIsExpired = (timestamp) => {
+                const expDate = new Date(timestamp);
+                expDate.setMonth(expDate.getMonth() + config.expirationMonths);
+                return expDate.getTime() < Date.now();
+            };
+
+            const handleShowQr = async (m) => {
+                try {
+                    const dateObj = new Date(m.timestamp);
+                    const expDate = new Date(dateObj);
+                    expDate.setMonth(expDate.getMonth() + config.expirationMonths);
+                    const qrContent = JSON.stringify({
+                        "治具名稱": m.fixtureName,
+                        "量測阻值": `${m.resistanceValue.toExponential(2)} Ω`,
+                        "量測日期": dateObj.toISOString().split('T')[0],
+                        "過期時間": expDate.toISOString().split('T')[0]
+                    });
+                    const url = await QRCode.toDataURL(qrContent, { width: 300, margin: 2 });
+                    setSelectedQr({ url, title: m.fixtureId, isExpired: checkIsExpired(m.timestamp) });
+                } catch (e) { console.error("Failed to generate QR", e); }
+            };
+
+            const handleAddToCalendar = (m) => {
+                const expDate = new Date(m.timestamp);
+                expDate.setMonth(expDate.getMonth() + config.expirationMonths);
+                const formatDate = (date) => date.toISOString().replace(/-|:|\.\d+/g, '').slice(0, 8);
+                const title = `[ESD到期] 治具: ${m.fixtureName}`;
+                const description = `治具編號: ${m.fixtureId}\\n檢測人員: ${m.inspectorName}\\n上次阻值: ${m.resistanceValue.toExponential(2)} Ω\\n\\n請進行 ESD 表面阻抗補測。`;
+                const icsContent = [
+                    'BEGIN:VCALENDAR',
+                    'VERSION:2.0',
+                    'BEGIN:VEVENT',
+                    `DTSTART;VALUE=DATE:${formatDate(expDate)}`,
+                    `DTEND;VALUE=DATE:${formatDate(new Date(expDate.getTime() + 86400000))}`,
+                    `SUMMARY:${title}`,
+                    `DESCRIPTION:${description}`,
+                    'BEGIN:VALARM',
+                    'ACTION:DISPLAY',
+                    'DESCRIPTION:ESD Fixture Expiration Reminder',
+                    'TRIGGER:-P1W',
+                    'END:VALARM',
+                    'END:VEVENT',
+                    'END:VCALENDAR'
+                ].join('\r\n');
+                const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+                const link = document.createElement('a');
+                link.href = window.URL.createObjectURL(blob);
+                link.setAttribute('download', `ESD_Reminder_${m.fixtureId}.ics`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const getResultBadge = (result) => {
+                switch (result) {
+                    case TestResult.PASS: return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800"><CheckCircle className="w-3 h-3" /> 合格</span>;
+                    case TestResult.FAIL_HIGH: return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800"><XCircle className="w-3 h-3" /> 失敗 (高阻)</span>;
+                    case TestResult.FAIL_LOW: return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 border border-yellow-200 dark:border-yellow-800"><AlertTriangle className="w-3 h-3" /> 失敗 (低阻)</span>;
+                }
+            };
+
+            const getExpirationDisplay = (m) => {
+                const expDate = new Date(m.timestamp);
+                expDate.setMonth(expDate.getMonth() + config.expirationMonths);
+                const now = Date.now();
+                const diff = expDate.getTime() - now;
+                const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+                if (diff < 0) {
+                    return <div className="flex flex-col items-start gap-1"><span className="text-red-600 dark:text-red-400 font-bold flex items-center gap-1 text-xs"><AlertTriangle size={12} /> 已過期</span><button onClick={() => onRenew(m)} className="text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition">立即補測</button></div>;
+                } else if (days <= config.warningDays) {
+                    return <span className="text-yellow-600 dark:text-yellow-500 font-bold flex items-center gap-1 text-xs"><CalendarClock size={12} /> 即將到期 ({expDate.toLocaleDateString()})</span>;
+                }
+                return <span className="text-gray-400 dark:text-gray-500 text-xs">{expDate.toLocaleDateString()} 到期</span>;
+            };
+
+            return (
+                <>
+                    {selectedQr && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setSelectedQr(null)}>
+                            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-sm w-full relative animate-fade-in-up shadow-2xl" onClick={e => e.stopPropagation()}>
+                                <button onClick={() => setSelectedQr(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={20} /></button>
+                                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 text-center">治具標籤: {selectedQr.title}</h3>
+                                <div className="flex justify-center mb-4 relative">
+                                    <img src={selectedQr.url} alt="QR Code" className={`w-48 h-48 border border-gray-200 dark:border-gray-600 rounded-lg ${selectedQr.isExpired ? 'blur-sm opacity-50' : ''}`} />
+                                    {selectedQr.isExpired && <div className="absolute inset-0 flex items-center justify-center"><span className="bg-red-600 text-white font-bold px-4 py-1 rounded-full transform -rotate-12 border-2 border-white shadow-lg">EXPIRED / 已過期</span></div>}
+                                </div>
+                                <p className="text-center text-sm text-gray-500 dark:text-gray-400">{selectedQr.isExpired ? '此標籤已失效，請重新量測' : '掃描以讀取量測資訊'}</p>
+                            </div>
+                        </div>
+                    )}
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left text-gray-900 dark:text-gray-100">
+                                <thead className="bg-gray-50 dark:bg-gray-750 text-gray-600 dark:text-gray-300 font-medium border-b border-gray-100 dark:border-gray-700">
+                                    <tr>
+                                        <th className="px-6 py-4">量測時間</th>
+                                        <th className="px-6 py-4">治具編號 / 名稱</th>
+                                        <th className="px-6 py-4">類型</th>
+                                        <th className="px-6 py-4 text-right">阻值 (Ω)</th>
+                                        <th className="px-6 py-4">結果</th>
+                                        <th className="px-6 py-4">效期狀態</th>
+                                        <th className="px-6 py-4 text-center">功能</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                    {sorted.map((m) => (
+                                        <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                            <td className="px-6 py-4 text-gray-500 dark:text-gray-400">
+                                                <div className="text-gray-900 dark:text-white">{new Date(m.timestamp).toLocaleDateString()}</div>
+                                                <div className="text-xs text-gray-400 dark:text-gray-500">{new Date(m.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="font-medium text-gray-900 dark:text-white">{m.fixtureId}</div>
+                                                <div className="text-xs text-gray-500 dark:text-gray-400">{m.fixtureName}</div>
+                                            </td>
+                                            <td className="px-6 py-4 text-gray-600 dark:text-gray-300">{FIXTURE_LABELS[m.type]}</td>
+                                            <td className="px-6 py-4 text-right font-mono text-gray-700 dark:text-gray-300">{m.resistanceValue.toExponential(2)}</td>
+                                            <td className="px-6 py-4">{getResultBadge(m.result)}</td>
+                                            <td className="px-6 py-4">{getExpirationDisplay(m)}</td>
+                                            <td className="px-6 py-4 text-center">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <button onClick={() => handleAddToCalendar(m)} className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-full transition" title="加入行事曆提醒"><CalendarPlus size={18} /></button>
+                                                    <button onClick={() => handleShowQr(m)} className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-full transition" title="顯示 QR Code"><QrIcon size={18} /></button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {sorted.length === 0 && <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-400 dark:text-gray-500">尚無治具量測記錄</td></tr>}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </>
+            );
+        };
+
+        const App = () => {
+            const [measurements, setMeasurements] = useState([]);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [showEntryForm, setShowEntryForm] = useState(false);
+            const [showSettings, setShowSettings] = useState(false);
+            const [entryFormInitialData, setEntryFormInitialData] = useState(null);
+            const [darkMode, setDarkMode] = useState(() => {
+                if (localStorage.getItem('theme')) {
+                    return localStorage.getItem('theme') === 'dark';
+                }
+                return window.matchMedia('(prefers-color-scheme: dark)').matches;
+            });
+            
+            const [config, setConfig] = useState({
+                expirationMonths: 6,
+                warningDays: 7,
+                notificationEmail: ''
+            });
+
+            // 1. Load Data from LocalStorage
+            useEffect(() => {
+                const savedM = localStorage.getItem('esd_measurements');
+                const savedC = localStorage.getItem('esd_config');
+                
+                if (savedM) {
+                    try { setMeasurements(JSON.parse(savedM)); } catch(e) {}
+                } else {
+                    setMeasurements(generateMockData()); // Seed mock data if empty
+                }
+
+                if (savedC) {
+                    try { setConfig(JSON.parse(savedC)); } catch(e) {}
+                }
+            }, []);
+
+            // 2. Save Data to LocalStorage
+            useEffect(() => {
+                localStorage.setItem('esd_measurements', JSON.stringify(measurements));
+            }, [measurements]);
+
+            useEffect(() => {
+                localStorage.setItem('esd_config', JSON.stringify(config));
+            }, [config]);
+
+            // 3. Theme Effect
+            useEffect(() => {
+                if (darkMode) {
+                    document.documentElement.classList.add('dark');
+                    localStorage.setItem('theme', 'dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    localStorage.setItem('theme', 'light');
+                }
+            }, [darkMode]);
+
+            const toggleTheme = () => setDarkMode(!darkMode);
+
+            const handleAddMeasurement = (newM) => {
+                const record = { ...newM, id: crypto.randomUUID(), timestamp: Date.now() };
+                setMeasurements(prev => [record, ...prev]);
+            };
+
+            const handleRenewFixture = (measurement) => {
+                setEntryFormInitialData({ fixtureId: measurement.fixtureId, fixtureName: measurement.fixtureName, type: measurement.type });
+                setShowEntryForm(true);
+            };
+
+            // Excel Export Logic
+            const handleExportExcel = () => {
+                const exportData = measurements.map(m => ({
+                    '量測時間': new Date(m.timestamp).toLocaleString(),
+                    '治具編號': m.fixtureId,
+                    '治具名稱': m.fixtureName,
+                    '類型': FIXTURE_LABELS[m.type] || m.type,
+                    '檢測人員': m.inspectorName,
+                    '阻值(Ω)': m.resistanceValue,
+                    '結果': m.result === TestResult.PASS ? '合格' : m.result
+                }));
+                
+                const ws = XLSX.utils.json_to_sheet(exportData);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "ESD量測記錄");
+                XLSX.writeFile(wb, `ESD_Measurements_${new Date().toISOString().slice(0,10)}.xlsx`);
+            };
+
+            // Excel Import Logic
+            const handleImportExcel = (file) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const sheetName = workbook.SheetNames[0];
+                    const sheet = workbook.Sheets[sheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(sheet);
+                    
+                    const newMeasurements = jsonData.map((row, index) => {
+                         // Simple mapper
+                         const typeLabel = row['類型'];
+                         let type = FixtureType.ICT;
+                         // Reverse lookup for type
+                         for (const [key, label] of Object.entries(FIXTURE_LABELS)) {
+                             if (label === typeLabel) type = key;
+                         }
+
+                         return {
+                             id: `imported-${Date.now()}-${index}`,
+                             timestamp: new Date(row['量測時間']).getTime() || Date.now(),
+                             fixtureId: row['治具編號'] || 'UNKNOWN',
+                             fixtureName: row['治具名稱'] || 'Unknown',
+                             type: type,
+                             inspectorName: row['檢測人員'] || '',
+                             resistanceValue: Number(row['阻值(Ω)']) || 0,
+                             result: row['結果'] === '合格' ? TestResult.PASS : TestResult.FAIL_HIGH // Simplified
+                         };
+                    });
+                    
+                    if (confirm(`成功讀取 ${newMeasurements.length} 筆資料。是否要匯入並覆蓋現有資料? (選擇取消則會附加在現有資料後)`)) {
+                        setMeasurements(newMeasurements);
+                    } else {
+                        setMeasurements(prev => [...newMeasurements, ...prev]);
+                    }
+                    alert("匯入完成");
+                };
+                reader.readAsArrayBuffer(file);
+            };
+
+            const expirationData = useMemo(() => {
+                const latestMap = new Map();
+                measurements.forEach(m => {
+                    const current = latestMap.get(m.fixtureId);
+                    if (!current || m.timestamp > current.timestamp) latestMap.set(m.fixtureId, m);
+                });
+                const results = [];
+                const now = Date.now();
+                const warningMs = config.warningDays * 24 * 60 * 60 * 1000;
+                latestMap.forEach(m => {
+                    const measuredDate = new Date(m.timestamp);
+                    const expDate = new Date(measuredDate);
+                    expDate.setMonth(expDate.getMonth() + config.expirationMonths);
+                    const timeDiff = expDate.getTime() - now;
+                    const daysRemaining = Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
+                    let status = 'VALID';
+                    if (timeDiff < 0) status = 'EXPIRED';
+                    else if (timeDiff < warningMs) status = 'WARNING';
+                    results.push({ fixtureId: m.fixtureId, fixtureName: m.fixtureName, lastMeasured: m.timestamp, expirationDate: expDate.getTime(), status, daysRemaining, originalRecord: m });
+                });
+                return results.sort((a, b) => a.daysRemaining - b.daysRemaining);
+            }, [measurements, config]);
+
+            const expiringItems = expirationData.filter(x => x.status !== 'VALID');
+            const handleSendEmail = () => {
+                if (expiringItems.length === 0) return;
+                const recipient = config.notificationEmail || '';
+                const subject = `[ESD Sentinel] 治具量測到期通知 - ${new Date().toLocaleDateString()}`;
+                let body = `你好，\n\n以下治具 ESD 量測即將到期或已過期，請盡快安排補測：\n\n`;
+                expiringItems.forEach(item => {
+                    const dateStr = new Date(item.expirationDate).toLocaleDateString();
+                    const statusStr = item.status === 'EXPIRED' ? '【已過期】' : '【即將到期】';
+                    body += `${statusStr} ${item.fixtureId} - ${item.fixtureName}\n  到期日: ${dateStr} (剩餘 ${item.daysRemaining} 天)\n\n`;
+                });
+                body += `請登入系統更新量測記錄。\n\nBest Regards,\nESD Sentinel System`;
+                window.location.href = `mailto:${recipient}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+            };
+
+            const stats = useMemo(() => {
+                const total = measurements.length;
+                const passes = measurements.filter(m => m.result === TestResult.PASS).length;
+                const fails = total - passes;
+                const passRate = total > 0 ? (passes / total) * 100 : 0;
+                const last24h = measurements.filter(m => Date.now() - m.timestamp < 24 * 60 * 60 * 1000).length;
+                return { total, passes, fails, passRate, last24h };
+            }, [measurements]);
+
+            const dailyData = useMemo(() => {
+                const map = new Map();
+                measurements.forEach(m => {
+                    const date = new Date(m.timestamp).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
+                    if (!map.has(date)) map.set(date, { date, pass: 0, fail: 0 });
+                    if (m.result === TestResult.PASS) map.get(date).pass++; else map.get(date).fail++;
+                });
+                return Array.from(map.values()).sort((a, b) => new Date(Date.parse(`2024/${a.date}`)) - new Date(Date.parse(`2024/${b.date}`))).slice(-7);
+            }, [measurements]);
+
+            const pieData = [
+                { name: '合格', value: stats.passes },
+                { name: '失敗 (高阻)', value: measurements.filter(m => m.result === TestResult.FAIL_HIGH).length },
+                { name: '失敗 (低阻)', value: measurements.filter(m => m.result === TestResult.FAIL_LOW).length },
+            ];
+
+            return (
+                <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col font-sans text-slate-800 dark:text-gray-100 transition-colors duration-200">
+                    <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-30 transition-colors duration-200">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <div className="bg-indigo-600 p-2 rounded-lg text-white"><Cpu size={20} /></div>
+                                <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-700 to-purple-600 dark:from-indigo-400 dark:to-purple-400 hidden sm:block">ESD Sentinel - 治具管理</h1>
+                            </div>
+                            <nav className="hidden md:flex items-center gap-1 bg-gray-100 dark:bg-gray-700 p-1 rounded-lg">
+                                <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'dashboard' ? 'bg-white dark:bg-gray-600 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-white'}`}>儀表板</button>
+                                <button onClick={() => setActiveTab('history')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'history' ? 'bg-white dark:bg-gray-600 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-white'}`}>治具記錄</button>
+                            </nav>
+                            <div className="flex items-center gap-2">
+                                <button onClick={toggleTheme} className="text-gray-400 hover:text-indigo-500 dark:text-gray-400 dark:hover:text-yellow-400 p-2 rounded-lg transition" title={darkMode ? '切換至亮色模式' : '切換至暗色模式'}>
+                                    {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+                                </button>
+                                <button onClick={() => setShowSettings(true)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 p-2 rounded-lg transition"><Settings size={20} /></button>
+                                <button onClick={() => setShowEntryForm(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition shadow-sm">
+                                    <Plus size={16} /> <span className="hidden sm:inline">新增量測</span>
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+                    
+                    <div className="md:hidden bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 p-2 flex justify-around">
+                        <button onClick={() => setActiveTab('dashboard')} className={`p-2 ${activeTab === 'dashboard' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 dark:text-gray-500'}`}><BarChart2 size={20}/></button>
+                        <button onClick={() => setActiveTab('history')} className={`p-2 ${activeTab === 'history' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 dark:text-gray-500'}`}><History size={20}/></button>
+                    </div>
+
+                    <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+                        {showEntryForm && <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"><div className="w-full max-w-2xl animate-fade-in-up"><EntryForm onAddMeasurement={handleAddMeasurement} onCancel={() => {setShowEntryForm(false); setEntryFormInitialData(null);}} config={config} initialData={entryFormInitialData}/></div></div>}
+                        {showSettings && <SettingsModal config={config} onSave={setConfig} onClose={() => setShowSettings(false)} onExport={handleExportExcel} onImport={handleImportExcel} />}
+
+                        {activeTab === 'dashboard' && (
+                            <div className="space-y-6">
+                                {expiringItems.length > 0 && (
+                                    <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-6 shadow-sm animate-fade-in-up">
+                                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="bg-orange-100 dark:bg-orange-900/50 p-2 rounded-full text-orange-600 dark:text-orange-400"><Calendar size={24} /></div>
+                                                <div><h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">效期維護提醒</h3><p className="text-sm text-gray-600 dark:text-gray-400">有 {expiringItems.length} 個治具需要關注 (效期: {config.expirationMonths} 個月)</p></div>
+                                            </div>
+                                            <button onClick={handleSendEmail} className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-300 rounded-lg hover:bg-orange-100 dark:hover:bg-orange-900/40 transition shadow-sm font-medium text-sm"><Mail size={16} /> 寄送 Email 通知</button>
+                                        </div>
+                                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-orange-100 dark:border-orange-900/50 overflow-hidden">
+                                            <table className="w-full text-sm text-left">
+                                                <thead className="bg-orange-50 dark:bg-orange-900/40 text-orange-800 dark:text-orange-200"><tr><th className="px-4 py-2">狀態</th><th className="px-4 py-2">治具 ID</th><th className="px-4 py-2">治具名稱</th><th className="px-4 py-2 text-right">到期日</th><th className="px-4 py-2 text-right">剩餘天數</th><th className="px-4 py-2"></th></tr></thead>
+                                                <tbody className="divide-y divide-orange-50 dark:divide-gray-700">
+                                                    {expiringItems.map(item => (
+                                                        <tr key={item.fixtureId} className="hover:bg-orange-50/50 dark:hover:bg-orange-900/10">
+                                                            <td className="px-4 py-2">{item.status === 'EXPIRED' ? <span className="inline-flex items-center gap-1 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2 py-0.5 rounded-full border border-red-100 dark:border-red-900/30"><AlertTriangle size={12} /> 已過期</span> : <span className="inline-flex items-center gap-1 text-xs font-bold text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-0.5 rounded-full border border-yellow-100 dark:border-yellow-900/30"><AlertTriangle size={12} /> 即將到期</span>}</td>
+                                                            <td className="px-4 py-2 font-mono text-gray-700 dark:text-gray-300">{item.fixtureId}</td>
+                                                            <td className="px-4 py-2 text-gray-600 dark:text-gray-400">{item.fixtureName}</td>
+                                                            <td className="px-4 py-2 text-right text-gray-500 dark:text-gray-400">{new Date(item.expirationDate).toLocaleDateString()}</td>
+                                                            <td className={`px-4 py-2 text-right font-medium ${item.daysRemaining < 0 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-500'}`}>{item.daysRemaining} 天</td>
+                                                            <td className="px-4 py-2 text-right"><button onClick={() => handleRenewFixture(item.originalRecord)} className="text-xs bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-2 py-1 rounded border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition">補測</button></td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                    <StatsCard title="已測治具數" value={stats.total} icon={Cpu} color="bg-blue-500 text-blue-600" trend={`+${stats.last24h}`} trendUp={true} />
+                                    <StatsCard title="合格率" value={`${stats.passRate.toFixed(1)}%`} icon={ShieldCheck} color="bg-green-500 text-green-600" />
+                                    <StatsCard title="維修/異常" value={stats.fails} icon={AlertOctagon} color="bg-red-500 text-red-600" />
+                                    <StatsCard title="今日測試" value={stats.last24h} icon={History} color="bg-purple-500 text-purple-600" />
+                                </div>
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 lg:col-span-2">
+                                        <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2"><BarChart2 className="w-5 h-5 text-gray-400" /> 治具狀況趨勢</h3>
+                                        <div className="h-64 w-full">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={dailyData}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "#374151" : "#E5E7EB"} />
+                                                    <XAxis dataKey="date" tick={{fontSize: 12, fill: darkMode ? '#9CA3AF' : '#6B7280'}} stroke={darkMode ? "#4B5563" : "#9CA3AF"} />
+                                                    <YAxis tick={{fontSize: 12, fill: darkMode ? '#9CA3AF' : '#6B7280'}} stroke={darkMode ? "#4B5563" : "#9CA3AF"} />
+                                                    <Tooltip 
+                                                        contentStyle={{
+                                                            borderRadius: '8px', 
+                                                            border: darkMode ? '1px solid #374151' : 'none', 
+                                                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                                                            backgroundColor: darkMode ? '#1f2937' : '#fff',
+                                                            color: darkMode ? '#fff' : '#000'
+                                                        }} 
+                                                        cursor={{fill: darkMode ? '#374151' : '#F3F4F6'}} 
+                                                    />
+                                                    <Legend wrapperStyle={{color: darkMode ? '#9CA3AF' : '#374151'}} />
+                                                    <Bar dataKey="pass" name="合格" stackId="a" fill="#10B981" radius={[0, 0, 4, 4]} />
+                                                    <Bar dataKey="fail" name="失敗" stackId="a" fill="#EF4444" radius={[4, 4, 0, 0]} />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+                                        <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-6">結果分佈</h3>
+                                        <div className="h-64 w-full flex items-center justify-center">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                                                        {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                                                    </Pie>
+                                                    <Tooltip 
+                                                        contentStyle={{
+                                                            borderRadius: '8px', 
+                                                            border: darkMode ? '1px solid #374151' : 'none', 
+                                                            backgroundColor: darkMode ? '#1f2937' : '#fff',
+                                                            color: darkMode ? '#fff' : '#000'
+                                                        }} 
+                                                    />
+                                                    <Legend verticalAlign="bottom" height={36}/>
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+                                    <div className="flex justify-between items-center mb-6"><h3 className="text-lg font-bold text-gray-800 dark:text-white">最新治具量測</h3><button onClick={() => setActiveTab('history')} className="text-indigo-600 dark:text-indigo-400 text-sm hover:underline">查看全部</button></div>
+                                    <HistoryTable measurements={measurements.slice(0, 5)} config={config} onRenew={handleRenewFixture} />
+                                </div>
+                            </div>
+                        )}
+                        {activeTab === 'history' && (
+                            <div className="space-y-6">
+                                <div className="flex justify-between items-center"><h2 className="text-2xl font-bold text-gray-800 dark:text-white">所有治具記錄</h2><div className="text-sm text-gray-500 dark:text-gray-400">共 {measurements.length} 筆資料</div></div>
+                                <HistoryTable measurements={measurements} config={config} onRenew={handleRenewFixture} />
+                            </div>
+                        )}
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
