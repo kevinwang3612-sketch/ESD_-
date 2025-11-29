@@ -36,7 +36,8 @@
   "imports": {
     "react": "https://esm.sh/react@18.2.0",
     "react-dom/client": "https://esm.sh/react-dom@18.2.0/client?deps=react@18.2.0",
-    "lucide-react": "https://esm.sh/lucide-react@0.263.1?deps=react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0?deps=react@18.2.0",
+    "lucide-react": "https://esm.sh/lucide-react@0.263.1?deps=react@18.2.0,react-dom@18.2.0",
     "recharts": "https://esm.sh/recharts@2.12.0?deps=react@18.2.0,react-dom@18.2.0",
     "qrcode": "https://esm.sh/qrcode@1.5.3",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
@@ -130,53 +131,8 @@
 
         // --- Mock Data Generator ---
         const generateMockData = () => {
-            const data = [];
-            const now = Date.now();
-            const inspectors = ['Alex Chen', 'Sarah Lin', 'Mike Wang'];
-            const fixtures = [
-                { id: 'TAG-MDA-001', name: '主板 MDA 治具 A', type: FixtureType.MDA },
-                { id: 'TAG-ICT-001', name: '主板 ICT 治具 A', type: FixtureType.ICT },
-                { id: 'TAG-ICT-002', name: '主板 ICT 治具 B', type: FixtureType.ICT },
-                { id: 'TAG-FCT-105', name: '音訊測試座', type: FixtureType.FCT },
-                { id: 'TAG-JIG-303', name: '組裝壓合治具', type: FixtureType.JIG },
-                { id: 'TAG-TRAY-009', name: '產線 ESD 托盤', type: FixtureType.TRAY },
-                { id: 'TAG-JIG-OLD-1', name: '舊款測試架 (待測)', type: FixtureType.JIG },
-            ];
-            
-            for (let i = 0; i < 20; i++) {
-                const fixture = fixtures[Math.floor(Math.random() * fixtures.length)];
-                const rand = Math.random();
-                let result = TestResult.PASS;
-                let val = 0;
-
-                if (rand > 0.2) {
-                    const minLog = Math.log10(1e4);
-                    const maxLog = Math.log10(1e9);
-                    val = Math.pow(10, minLog + Math.random() * (maxLog - minLog));
-                    result = TestResult.PASS;
-                } else if (rand > 0.05) {
-                    val = 1e9 + Math.random() * 9e9;
-                    result = TestResult.FAIL_HIGH;
-                } else {
-                    val = Math.random() * 1e4;
-                    result = TestResult.FAIL_LOW;
-                }
-                
-                const daysAgo = Math.floor(Math.random() * 180); 
-                const timestamp = now - (daysAgo * 24 * 60 * 60 * 1000);
-
-                data.push({
-                    id: `mock-${i}`,
-                    timestamp: timestamp,
-                    inspectorName: inspectors[Math.floor(Math.random() * inspectors.length)],
-                    fixtureId: fixture.id,
-                    fixtureName: fixture.name,
-                    type: fixture.type,
-                    resistanceValue: val,
-                    result: result
-                });
-            }
-            return data;
+            // CLEAN SLATE: Return empty array as requested
+            return [];
         };
 
         // --- Components ---
@@ -323,10 +279,10 @@
 
         const EntryForm = ({ onAddMeasurement, onCancel, config, initialData }) => {
             const [step, setStep] = useState('form');
-            const [inspectorName, setInspectorName] = useState('');
+            const [inspectorName, setInspectorName] = useState('Kevin_YK_Wang');
             const [fixtureId, setFixtureId] = useState(initialData?.fixtureId || '');
             const [fixtureName, setFixtureName] = useState(initialData?.fixtureName || '');
-            const [type, setType] = useState(initialData?.type || FixtureType.MDA); // Default to MDA
+            const [type, setType] = useState(initialData?.type || FixtureType.MDA); 
             const [resistanceValue, setResistanceValue] = useState('');
             const [qrUrl, setQrUrl] = useState('');
             const [savedData, setSavedData] = useState(null);
@@ -459,7 +415,7 @@
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">標籤編號 (ID)</label>
-                                <input required type="text" value={fixtureId} onChange={e => setFixtureId(e.target.value.toUpperCase())} disabled={!!initialData} className={`w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition uppercase ${initialData ? 'bg-gray-100 dark:bg-gray-900 text-gray-500' : ''}`} placeholder="TAG-2024-001" />
+                                <input required type="text" value={fixtureId} onChange={e => setFixtureId(e.target.value)} disabled={!!initialData} className={`w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition ${initialData ? 'bg-gray-100 dark:bg-gray-900 text-gray-500' : ''}`} placeholder="TAG-2024-001" />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">治具名稱</label>
@@ -473,7 +429,7 @@
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">檢測人員</label>
-                                <input required type="text" value={inspectorName} onChange={e => setInspectorName(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="例如: Alex Chen" />
+                                <input required type="text" value={inspectorName} onChange={e => setInspectorName(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="例如: Kevin_YK_Wang" />
                             </div>
                             <div className="md:col-span-2">
                                 <div className="flex justify-between items-end mb-1">
@@ -611,7 +567,7 @@
                                 <thead className="bg-gray-50 dark:bg-gray-750 text-gray-600 dark:text-gray-300 font-medium border-b border-gray-100 dark:border-gray-700">
                                     <tr>
                                         <th className="px-6 py-4">量測時間</th>
-                                        <th className="px-6 py-4">標籤編號 / 名稱</th>
+                                        <th className="px-6 py-4">標籤編號 / 治具名稱</th>
                                         <th className="px-6 py-4">類型</th>
                                         <th className="px-6 py-4 text-right">阻值 (Ω)</th>
                                         <th className="px-6 py-4">結果</th>
