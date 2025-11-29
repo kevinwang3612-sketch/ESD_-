@@ -86,7 +86,7 @@
             RefreshCw, Cpu, Calendar, Mail, AlertTriangle, CheckCircle2, 
             Settings, Save, CheckCircle, XCircle, QrCode as QrIcon, X, 
             CalendarClock, CalendarPlus, Download, Upload, FileSpreadsheet,
-            Moon, Sun, ArrowUp, ArrowDown, ArrowUpDown
+            Moon, Sun, ArrowUp, ArrowDown, ArrowUpDown, LogOut, Database
         } from 'lucide-react';
         import {
             BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -153,6 +153,59 @@
                 )}
             </div>
         );
+
+        const StartupModal = ({ onImport, onSkip }) => {
+            const fileInputRef = useRef(null);
+            
+            const handleFileChange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    onImport(file);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+                     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md animate-fade-in-up overflow-hidden border border-gray-200 dark:border-gray-700">
+                        <div className="p-8 text-center">
+                            <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <Database className="w-10 h-10 text-indigo-600 dark:text-indigo-400" />
+                            </div>
+                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">歡迎使用 ESD Sentinel</h2>
+                            <p className="text-gray-500 dark:text-gray-400 mb-8">
+                                系統偵測到您已開啟應用程式。為了確保資料完整，您想要匯入上次備份的量測 Excel 檔案嗎？
+                            </p>
+                            
+                            <div className="space-y-3">
+                                <button 
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium shadow-lg shadow-indigo-200 dark:shadow-none transition flex items-center justify-center gap-2"
+                                >
+                                    <Upload size={18} />
+                                    匯入 Excel 檔案
+                                </button>
+                                <input 
+                                    type="file" 
+                                    ref={fileInputRef}
+                                    onChange={handleFileChange}
+                                    accept=".xlsx,.xls"
+                                    className="hidden"
+                                />
+                                <button 
+                                    onClick={onSkip}
+                                    className="w-full py-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-xl font-medium transition"
+                                >
+                                    跳過，使用現有或空白資料
+                                </button>
+                            </div>
+                        </div>
+                        <div className="bg-gray-50 dark:bg-gray-900/50 p-4 text-center text-xs text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700">
+                            提示：關閉網頁前，請務必匯出資料以防遺失。
+                        </div>
+                     </div>
+                </div>
+            );
+        };
 
         const SettingsModal = ({ config, onSave, onClose, onExport, onImport }) => {
             const [formData, setFormData] = useState(config);
@@ -725,6 +778,7 @@
             const [showSettings, setShowSettings] = useState(false);
             const [entryFormInitialData, setEntryFormInitialData] = useState(null);
             const [scanData, setScanData] = useState(null);
+            const [showStartupModal, setShowStartupModal] = useState(true);
             
             const [darkMode, setDarkMode] = useState(() => {
                 if (localStorage.getItem('theme')) {
@@ -739,12 +793,26 @@
                 notificationEmail: ''
             });
 
-            // 0. Handle QR Code URL parameters on mount
+            // 0. Handle BeforeUnload (Prevent accidental close)
+            useEffect(() => {
+                const handleBeforeUnload = (e) => {
+                    e.preventDefault();
+                    // Modern browsers ignore this message and show a generic one, but the event trigger is required.
+                    e.returnValue = '您的變更可能未儲存。請確認已匯出 Excel 檔案。';
+                    return e.returnValue;
+                };
+                window.addEventListener('beforeunload', handleBeforeUnload);
+                return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+            }, []);
+
+            // 0.5 Handle QR Code URL parameters on mount
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
                 const q = params.get('q');
                 if (q) {
                     try {
+                        // If opened via QR, don't show startup import modal
+                        setShowStartupModal(false);
                         const decodedStr = decodeURIComponent(escape(window.atob(q)));
                         const data = JSON.parse(decodedStr);
                         if (data && data.id && data.exp) {
@@ -897,11 +965,16 @@
                          };
                     });
                     
-                    if (confirm(`成功讀取 ${importCount} 筆資料。是否要匯入並覆蓋現有資料? (選擇取消則會附加在現有資料後)`)) {
-                        setMeasurements(newMeasurements);
-                    } else {
-                        setMeasurements(prev => [...newMeasurements, ...prev]);
-                    }
+                    setMeasurements(prev => {
+                        // Simple merge for simplicity, or replacement if startup
+                        // For the modal "Import", we assume appending or replacing is handled by user intent in a real app,
+                        // Here we just append to be safe.
+                        return [...newMeasurements, ...prev]; 
+                    });
+                    
+                    // If triggered from modal, close modal
+                    setShowStartupModal(false);
+                    alert(`成功讀取 ${importCount} 筆資料。`);
                 };
                 reader.readAsArrayBuffer(file);
             };
@@ -980,6 +1053,7 @@
                     </div>
 
                     <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+                        {showStartupModal && <StartupModal onImport={handleImportExcel} onSkip={() => setShowStartupModal(false)} />}
                         {showEntryForm && <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"><div className="w-full max-w-2xl animate-fade-in-up"><EntryForm onAddMeasurement={handleAddMeasurement} onCancel={() => {setShowEntryForm(false); setEntryFormInitialData(null);}} config={config} initialData={entryFormInitialData}/></div></div>}
                         {showSettings && <SettingsModal config={config} onSave={setConfig} onClose={() => setShowSettings(false)} onExport={handleExportExcel} onImport={handleImportExcel} />}
                         {scanData && <ScanResultModal data={scanData} onClose={() => setScanData(null)} />}
