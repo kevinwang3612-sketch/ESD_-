@@ -98,10 +98,10 @@
         const COLORS = ['#10B981', '#EF4444', '#F59E0B'];
 
         const FixtureType = {
+            MDA: 'MDA',
             ICT: 'ICT',
             FCT: 'FCT',
             JIG: 'JIG',
-            MDA: 'MDA',
             TRAY: 'TRAY'
         };
 
@@ -112,15 +112,16 @@
         };
 
         const THRESHOLDS = {
+            [FixtureType.MDA]:  { lowLimit: 1e4, highLimit: 1e9 },
             [FixtureType.ICT]:  { lowLimit: 1e4, highLimit: 1e9 },
             [FixtureType.FCT]:  { lowLimit: 1e4, highLimit: 1e9 },
             [FixtureType.JIG]:  { lowLimit: 1e4, highLimit: 1e9 },
-            [FixtureType.MDA]:  { lowLimit: 1e4, highLimit: 1e9 },
             [FixtureType.TRAY]: { lowLimit: 1e4, highLimit: 1e9 }
         };
 
+        // Note: The order here determines the order in the dropdown
         const FIXTURE_LABELS = {
-            [FixtureType.MDA]: 'MDA測試治具',
+            [FixtureType.MDA]: 'MDA 測試治具',
             [FixtureType.ICT]: 'ICT 測試治具',
             [FixtureType.FCT]: 'FCT 功能治具',
             [FixtureType.JIG]: '組裝治具',
@@ -133,12 +134,13 @@
             const now = Date.now();
             const inspectors = ['Alex Chen', 'Sarah Lin', 'Mike Wang'];
             const fixtures = [
-                { id: 'FIX-ICT-001', name: '主板 ICT 治具 A', type: FixtureType.ICT },
-                { id: 'FIX-ICT-002', name: '主板 ICT 治具 B', type: FixtureType.ICT },
-                { id: 'FIX-FCT-105', name: '音訊測試座', type: FixtureType.FCT },
-                { id: 'FIX-JIG-303', name: '組裝壓合治具', type: FixtureType.JIG },
-                { id: 'FIX-TRAY-009', name: '產線 ESD 托盤', type: FixtureType.TRAY },
-                { id: 'FIX-JIG-OLD-1', name: '舊款測試架 (待測)', type: FixtureType.JIG },
+                { id: 'TAG-MDA-001', name: '主板 MDA 治具 A', type: FixtureType.MDA },
+                { id: 'TAG-ICT-001', name: '主板 ICT 治具 A', type: FixtureType.ICT },
+                { id: 'TAG-ICT-002', name: '主板 ICT 治具 B', type: FixtureType.ICT },
+                { id: 'TAG-FCT-105', name: '音訊測試座', type: FixtureType.FCT },
+                { id: 'TAG-JIG-303', name: '組裝壓合治具', type: FixtureType.JIG },
+                { id: 'TAG-TRAY-009', name: '產線 ESD 托盤', type: FixtureType.TRAY },
+                { id: 'TAG-JIG-OLD-1', name: '舊款測試架 (待測)', type: FixtureType.JIG },
             ];
             
             for (let i = 0; i < 20; i++) {
@@ -324,7 +326,7 @@
             const [inspectorName, setInspectorName] = useState('');
             const [fixtureId, setFixtureId] = useState(initialData?.fixtureId || '');
             const [fixtureName, setFixtureName] = useState(initialData?.fixtureName || '');
-            const [type, setType] = useState(initialData?.type || FixtureType.ICT);
+            const [type, setType] = useState(initialData?.type || FixtureType.MDA); // Default to MDA
             const [resistanceValue, setResistanceValue] = useState('');
             const [qrUrl, setQrUrl] = useState('');
             const [savedData, setSavedData] = useState(null);
@@ -371,7 +373,7 @@
                 expDate.setMonth(expDate.getMonth() + config.expirationMonths);
                 const formatDate = (date) => date.toISOString().replace(/-|:|\.\d+/g, '').slice(0, 8);
                 const title = `[ESD到期] 治具: ${savedData.fixtureName}`;
-                const description = `治具編號: ${savedData.fixtureId}\\n檢測人員: ${savedData.inspectorName}\\n上次阻值: ${savedData.resistanceValue.toExponential(2)} Ω\\n\\n請進行 ESD 表面阻抗補測。`;
+                const description = `標籤編號: ${savedData.fixtureId}\\n檢測人員: ${savedData.inspectorName}\\n上次阻值: ${savedData.resistanceValue.toExponential(2)} Ω\\n\\n請進行 ESD 表面阻抗補測。`;
                 
                 const icsContent = [
                     'BEGIN:VCALENDAR',
@@ -456,8 +458,8 @@
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">治具編號 (ID)</label>
-                                <input required type="text" value={fixtureId} onChange={e => setFixtureId(e.target.value.toUpperCase())} disabled={!!initialData} className={`w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition uppercase ${initialData ? 'bg-gray-100 dark:bg-gray-900 text-gray-500' : ''}`} placeholder="FIX-2024-001" />
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">標籤編號 (ID)</label>
+                                <input required type="text" value={fixtureId} onChange={e => setFixtureId(e.target.value.toUpperCase())} disabled={!!initialData} className={`w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition uppercase ${initialData ? 'bg-gray-100 dark:bg-gray-900 text-gray-500' : ''}`} placeholder="TAG-2024-001" />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">治具名稱</label>
@@ -540,7 +542,7 @@
                 expDate.setMonth(expDate.getMonth() + config.expirationMonths);
                 const formatDate = (date) => date.toISOString().replace(/-|:|\.\d+/g, '').slice(0, 8);
                 const title = `[ESD到期] 治具: ${m.fixtureName}`;
-                const description = `治具編號: ${m.fixtureId}\\n檢測人員: ${m.inspectorName}\\n上次阻值: ${m.resistanceValue.toExponential(2)} Ω\\n\\n請進行 ESD 表面阻抗補測。`;
+                const description = `標籤編號: ${m.fixtureId}\\n檢測人員: ${m.inspectorName}\\n上次阻值: ${m.resistanceValue.toExponential(2)} Ω\\n\\n請進行 ESD 表面阻抗補測。`;
                 const icsContent = [
                     'BEGIN:VCALENDAR',
                     'VERSION:2.0',
@@ -609,7 +611,7 @@
                                 <thead className="bg-gray-50 dark:bg-gray-750 text-gray-600 dark:text-gray-300 font-medium border-b border-gray-100 dark:border-gray-700">
                                     <tr>
                                         <th className="px-6 py-4">量測時間</th>
-                                        <th className="px-6 py-4">治具編號 / 名稱</th>
+                                        <th className="px-6 py-4">標籤編號 / 名稱</th>
                                         <th className="px-6 py-4">類型</th>
                                         <th className="px-6 py-4 text-right">阻值 (Ω)</th>
                                         <th className="px-6 py-4">結果</th>
@@ -718,15 +720,22 @@
 
             // Excel Export Logic
             const handleExportExcel = () => {
-                const exportData = measurements.map(m => ({
-                    '量測時間': new Date(m.timestamp).toLocaleString(),
-                    '治具編號': m.fixtureId,
-                    '治具名稱': m.fixtureName,
-                    '類型': FIXTURE_LABELS[m.type] || m.type,
-                    '檢測人員': m.inspectorName,
-                    '阻值(Ω)': m.resistanceValue,
-                    '結果': m.result === TestResult.PASS ? '合格' : m.result
-                }));
+                const exportData = measurements.map(m => {
+                    const measuredDate = new Date(m.timestamp);
+                    const expDate = new Date(measuredDate);
+                    expDate.setMonth(expDate.getMonth() + config.expirationMonths);
+                    
+                    return {
+                        '量測時間': measuredDate.toLocaleString(),
+                        '標籤編號': m.fixtureId,
+                        '治具名稱': m.fixtureName,
+                        '類型': FIXTURE_LABELS[m.type] || m.type,
+                        '檢測人員': m.inspectorName,
+                        '阻值(Ω)': m.resistanceValue,
+                        '結果': m.result === TestResult.PASS ? '合格' : m.result,
+                        '過期時間': expDate.toLocaleDateString()
+                    };
+                });
                 
                 const ws = XLSX.utils.json_to_sheet(exportData);
                 const wb = XLSX.utils.book_new();
@@ -756,7 +765,7 @@
                          return {
                              id: `imported-${Date.now()}-${index}`,
                              timestamp: new Date(row['量測時間']).getTime() || Date.now(),
-                             fixtureId: row['治具編號'] || 'UNKNOWN',
+                             fixtureId: row['標籤編號'] || row['治具編號'] || 'UNKNOWN',
                              fixtureName: row['治具名稱'] || 'Unknown',
                              type: type,
                              inspectorName: row['檢測人員'] || '',
@@ -884,7 +893,7 @@
                                         </div>
                                         <div className="bg-white dark:bg-gray-800 rounded-lg border border-orange-100 dark:border-orange-900/50 overflow-hidden">
                                             <table className="w-full text-sm text-left">
-                                                <thead className="bg-orange-50 dark:bg-orange-900/40 text-orange-800 dark:text-orange-200"><tr><th className="px-4 py-2">狀態</th><th className="px-4 py-2">治具 ID</th><th className="px-4 py-2">治具名稱</th><th className="px-4 py-2 text-right">到期日</th><th className="px-4 py-2 text-right">剩餘天數</th><th className="px-4 py-2"></th></tr></thead>
+                                                <thead className="bg-orange-50 dark:bg-orange-900/40 text-orange-800 dark:text-orange-200"><tr><th className="px-4 py-2">狀態</th><th className="px-4 py-2">標籤編號</th><th className="px-4 py-2">治具名稱</th><th className="px-4 py-2 text-right">到期日</th><th className="px-4 py-2 text-right">剩餘天數</th><th className="px-4 py-2"></th></tr></thead>
                                                 <tbody className="divide-y divide-orange-50 dark:divide-gray-700">
                                                     {expiringItems.map(item => (
                                                         <tr key={item.fixtureId} className="hover:bg-orange-50/50 dark:hover:bg-orange-900/10">
