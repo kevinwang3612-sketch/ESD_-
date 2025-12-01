@@ -36,6 +36,7 @@
   "imports": {
     "react": "https://esm.sh/react@18.2.0",
     "react-dom/client": "https://esm.sh/react-dom@18.2.0/client?deps=react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0?deps=react@18.2.0",
     "lucide-react": "https://esm.sh/lucide-react@0.263.1?deps=react@18.2.0",
     "recharts": "https://esm.sh/recharts@2.12.0?deps=react@18.2.0",
     "qrcode": "https://esm.sh/qrcode@1.5.3",
@@ -73,7 +74,6 @@
         background: #6b7280; 
       }
     </style>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
     <div id="root"></div>
@@ -86,7 +86,7 @@
             RefreshCw, Cpu, Calendar, Mail, AlertTriangle, CheckCircle2, 
             Settings, Save, CheckCircle, XCircle, QrCode as QrIcon, X, 
             CalendarClock, CalendarPlus, Download, Upload, FileSpreadsheet,
-            Moon, Sun, ArrowUp, ArrowDown, ArrowUpDown, LogOut, Database
+            Moon, Sun, ArrowUp, ArrowDown, ArrowUpDown, LogOut, Database, Link as LinkIcon
         } from 'lucide-react';
         import {
             BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -312,6 +312,23 @@
                                     </div>
                                 </div>
 
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">QR Code 掃描跳轉網址</label>
+                                    <div className="relative">
+                                        <LinkIcon className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
+                                        <input 
+                                            type="text" 
+                                            value={formData.qrBaseUrl}
+                                            onChange={e => setFormData({...formData, qrBaseUrl: e.target.value})}
+                                            placeholder="https://yourname.github.io/esd/"
+                                            className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition text-sm font-mono"
+                                        />
+                                    </div>
+                                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                                        若您在本機 (file://) 執行，請設定此網址為您的 GitHub Pages 公開連結，確保手機掃描後能開啟。
+                                    </p>
+                                </div>
+
                                 <div className="pt-4 flex justify-end gap-3 border-t border-gray-50 dark:border-gray-700 mt-2">
                                     <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition font-medium">取消</button>
                                     <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium flex items-center gap-2">
@@ -368,8 +385,18 @@
                     };
                     
                     const jsonStr = JSON.stringify(payload);
-                    const base64Data = window.btoa(unescape(encodeURIComponent(jsonStr)));
-                    const appUrl = `${window.location.origin}${window.location.pathname}?q=${base64Data}`;
+                    const base64Data = window.btoa(unescape(encodeURIComponent(jsonStr)))
+                        .replace(/\+/g, '-')
+                        .replace(/\//g, '_')
+                        .replace(/=+$/, '');
+                        
+                    // Use configured Base URL or current location if local
+                    let baseUrl = config.qrBaseUrl;
+                    if (!baseUrl || baseUrl.trim() === '') {
+                        baseUrl = window.location.href.split('?')[0];
+                    }
+                    
+                    const appUrl = `${baseUrl}?q=${base64Data}`;
                     
                     const url = await QRCode.toDataURL(appUrl, { width: 300, margin: 2 });
                     setQrUrl(url);
@@ -531,6 +558,8 @@
             if (diff < 0) status = 'EXPIRED';
             else if (daysRemaining <= 7) status = 'WARNING';
 
+            const isLocal = window.location.protocol === 'file:' || window.location.hostname === 'localhost';
+
             return (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-sm w-full p-8 text-center animate-fade-in-up border border-gray-200 dark:border-gray-700 relative">
@@ -559,6 +588,12 @@
                         {status === 'WARNING' && <div className="bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-300 py-3 rounded-lg font-bold text-lg">⚠️ 即將到期 (剩 {daysRemaining} 天)</div>}
                         {status === 'EXPIRED' && <div className="bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300 py-3 rounded-lg font-bold text-lg">❌ 已過期 {Math.abs(daysRemaining)} 天</div>}
                         
+                        {isLocal && (
+                            <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded text-sm text-left">
+                                <b>注意：</b> 您正在本機或檔案模式執行。此模式產生的 QR Code 在手機上可能無法開啟。請將專案上傳至 GitHub Pages 以獲得完整功能。
+                            </div>
+                        )}
+
                         <button onClick={onClose} className="mt-6 w-full py-3 bg-gray-900 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-800 dark:hover:bg-gray-600 transition">進入系統</button>
                     </div>
                 </div>
@@ -589,8 +624,18 @@
                         exp: expDate.getTime()
                     };
                     const jsonStr = JSON.stringify(payload);
-                    const base64Data = window.btoa(unescape(encodeURIComponent(jsonStr)));
-                    const appUrl = `${window.location.origin}${window.location.pathname}?q=${base64Data}`;
+                    const base64Data = window.btoa(unescape(encodeURIComponent(jsonStr)))
+                        .replace(/\+/g, '-')
+                        .replace(/\//g, '_')
+                        .replace(/=+$/, '');
+                    
+                    // Use configured Base URL or current location if local
+                    let baseUrl = config.qrBaseUrl;
+                    if (!baseUrl || baseUrl.trim() === '') {
+                        baseUrl = window.location.href.split('?')[0];
+                    }
+                    
+                    const appUrl = `${baseUrl}?q=${base64Data}`;
 
                     const url = await QRCode.toDataURL(appUrl, { width: 300, margin: 2 });
                     setSelectedQr({ url, title: m.fixtureId, isExpired: checkIsExpired(m.timestamp) });
@@ -764,7 +809,7 @@
         };
 
         const App = () => {
-            // FIXED: Initialize state from LocalStorage directly to avoid flashing empty state or mock data overwrites
+            // FIXED: Initialize state from LocalStorage directly
             const [measurements, setMeasurements] = useState(() => {
                 const saved = localStorage.getItem('esd_measurements');
                 return saved ? JSON.parse(saved) : [];
@@ -786,10 +831,16 @@
             
             const [config, setConfig] = useState(() => {
                 const saved = localStorage.getItem('esd_config');
+                // Default Base URL for user convenience if running locally
+                const defaultBaseUrl = (window.location.protocol === 'file:') 
+                    ? 'https://kevinwang3612-sketch.github.io/ESD_/' 
+                    : '';
+
                 return saved ? JSON.parse(saved) : {
                     expirationMonths: 6,
                     warningDays: 7,
-                    notificationEmail: ''
+                    notificationEmail: '',
+                    qrBaseUrl: defaultBaseUrl
                 };
             });
 
@@ -811,7 +862,7 @@
                 if (q) {
                     try {
                         setShowStartupModal(false);
-                        const decodedStr = decodeURIComponent(escape(window.atob(q)));
+                        const decodedStr = decodeURIComponent(escape(window.atob(q.replace(/-/g, '+').replace(/_/g, '/'))));
                         const data = JSON.parse(decodedStr);
                         if (data && data.id && data.exp) {
                             setScanData(data);
@@ -823,7 +874,7 @@
                 }
             }, []);
 
-            // 2. Save Data to LocalStorage (This is the only side effect needed)
+            // 2. Save Data to LocalStorage
             useEffect(() => {
                 localStorage.setItem('esd_measurements', JSON.stringify(measurements));
             }, [measurements]);
@@ -1079,7 +1130,11 @@
                     </main>
                     {/* Unsaved Changes Indicator */}
                     <div className={`fixed bottom-4 left-4 z-40 transition-opacity duration-300 ${measurements.length > 0 ? 'opacity-100' : 'opacity-0'}`}>
-                        <div className="bg-white dark:bg-gray-800 rounded-full shadow-lg border border-gray-200 dark:border-gray-700 px-3 py-1.5 flex items-center gap-2 text-xs font-medium">
+                        <div 
+                            onClick={handleExportExcel}
+                            title="點擊立即備份 (匯出 Excel)"
+                            className="bg-white dark:bg-gray-800 rounded-full shadow-lg border border-gray-200 dark:border-gray-700 px-3 py-1.5 flex items-center gap-2 text-xs font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                        >
                            <span className="relative flex h-2.5 w-2.5">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
@@ -1094,6 +1149,5 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
-<script type="module" src="/index.tsx"></script>
 </body>
 </html>
